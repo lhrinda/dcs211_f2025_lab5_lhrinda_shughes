@@ -83,12 +83,15 @@ def predictiveModel(train_set: np.ndarray, features: np.ndarray) -> int:
     Returns:
         an int coorespondng to the predicted digit for the given test arrays
     '''
+    # 1) separates array into data and labels 
     pixels = train_set[:, :-1]
     labels = train_set[:, -1]
 
+    # 2) Find smallest distance from set
     distances = np.linalg.norm(pixels - features, axis=1)
     nearest_index = np.argmin(distances)
 
+    # Return predicted int
     return int(labels[nearest_index])
 
 ###################
@@ -101,7 +104,7 @@ def main() -> None:
 
     A = cleanTheData(df)
 
-    num_to_draw = 5
+    num_to_draw = 1
     for i in range(num_to_draw):
         # let's grab one row of the df at random, extract/shape the digit to be
         # 8x8, and then draw a heatmap of that digit
@@ -117,9 +120,9 @@ def main() -> None:
     # OK!  Onward to knn for digits! (based on your iris work...)
     #
 
-    train_size = int(0.8 * len(cleaned))
-    train_set = cleaned[:train_size]
-    test_set  = cleaned[train_size:]
+    train_size = int(0.8 * len(A))
+    train_set = A[:train_size]
+    test_set  = A[train_size:]
 
     correct = 0
     total = len(test_set)
@@ -137,8 +140,8 @@ def main() -> None:
     
     print(f"\nAccuracy: {accuracy:.3f}")
 
-    train_set2 = cleaned[train_size:]
-    test_set2  = cleaned[:train_size]
+    train_set2 = A[train_size:]
+    test_set2  = A[:train_size]
     
     correct2 = 0
     total2 = len(test_set)
