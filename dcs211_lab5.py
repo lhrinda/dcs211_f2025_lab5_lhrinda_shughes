@@ -3,6 +3,7 @@ import pandas as pd     # Pandas is Python's "data" library ("dataframe" == spre
 import seaborn as sns   # yay for Seaborn plots!
 import matplotlib.pyplot as plt
 import random
+from tqdm import tqdm
 
 ###########################################################################
 def drawDigitHeatmap(pixels: np.ndarray, showNumbers: bool = True) -> None:
@@ -48,6 +49,23 @@ def fetchDigit(df: pd.core.frame.DataFrame, which_row: int) -> tuple[int, np.nda
     return (digit, pixels)              # return a tuple
 
 ###################
+def predictiveModel(train_set: np.ndarray, features: np.ndarray) -> int:
+    '''Uses the 1-NN predictive model on a given training set with given features
+    Parameters:
+        train_set: a training data set with one row cooresponding to an image of a digit
+        features: the pixel values for a given digit
+    Returns:
+        an int coorespondng to the predicted digit for the given test arrays
+    '''
+    pixels = train_set[:, :-1]
+    labels = train_set[:, -1]
+
+    distances = np.linalg.norm(pixels - features, axis=1)
+    nearest_index = np.argmin(distances)
+
+    return int(labels[nearest_index])
+
+###################
 def main() -> None:
     # for read_csv, use header=0 when row 0 is a header row
     filename = 'digits.csv'
@@ -70,6 +88,45 @@ def main() -> None:
     #
     # OK!  Onward to knn for digits! (based on your iris work...)
     #
+
+    train_size = int(0.8 * len(cleaned))
+    train_set = cleaned[:train_size]
+    test_set  = cleaned[train_size:]
+
+    correct = 0
+    total = len(test_set)
+    
+    for i in tqdm(range(total), desc="Predicting test digits"):
+        test_features = test_set[i, :-1]
+        true_label = int(test_set[i, -1])
+        
+        predicted_label = predictiveModel(train_set, test_features)
+        
+        if predicted_label == true_label:
+            correct += 1
+    
+    accuracy = correct / total
+    
+    print(f"\nAccuracy: {accuracy:.3f}")
+
+    train_set2 = cleaned[train_size:]
+    test_set2  = cleaned[:train_size]
+    
+    correct2 = 0
+    total2 = len(test_set)
+    
+    for i in tqdm(range(total), desc="Predicting test digits again"):
+        test_features = test_set2[i, :-1]
+        true_label = int(test_set2[i, -1])
+        
+        predicted_label = predictiveModel(train_set2, test_features)
+        
+        if predicted_label == true_label:
+            correct2 += 1
+    
+    accuracy2 = correct2 / total2
+    
+    print(f"\nAccuracy #2: {accuracy2:.3f}")
 
 ###############################################################################
 # wrap the call to main inside this if so that _this_ file can be imported
