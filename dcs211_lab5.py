@@ -48,6 +48,32 @@ def fetchDigit(df: pd.core.frame.DataFrame, which_row: int) -> tuple[int, np.nda
     pixels = np.reshape(pixels, (8,8))  # makes 8x8
     return (digit, pixels)              # return a tuple
 
+###########################################################################
+def cleanTheData(df: pd.core.frame.DataFrame) -> np.ndarray:
+    ''' Clean the dataframe by dropping columns that are entirely 
+        NaN, dropping rows containing any NaN, and converting the result to 
+        a float64 NumPy array (features first, label in the last column).
+    Parameters:
+        df: pandas data frame obtained by reading csv
+    Returns:
+        A: a NumPy array (dtype float64) of the cleaned data
+    '''
+    # 1) find fully-empty columns and drop them (class-style)
+    cols_all_nan = []
+    for col in df.columns:
+        if df[col].isna().all():
+            cols_all_nan.append(col)
+    df_clean = df.drop(columns=cols_all_nan)
+
+    # 2) drop any rows with NaN
+    df_clean = df_clean.dropna()
+
+    # 3) convert to numpy and cast to float64
+    A = df_clean.to_numpy()
+    A = A.astype('float64')
+
+    return A
+
 ###################
 def predictiveModel(train_set: np.ndarray, features: np.ndarray) -> int:
     '''Uses the 1-NN predictive model on a given training set with given features
@@ -72,6 +98,8 @@ def main() -> None:
     df = pd.read_csv(filename, header = 0)
     print(df.head())
     print(f"{filename} : file read into a pandas dataframe...")
+
+    A = cleanTheData(df)
 
     num_to_draw = 5
     for i in range(num_to_draw):
