@@ -27,7 +27,7 @@ def drawDigitHeatmap(pixels: np.ndarray, showNumbers: bool = True) -> None:
     # (fmt = "d" indicates to show annotation with integer format)
     sns.heatmap(pixels, annot = showNumbers, fmt = "d", linewidths = 0.5, \
                 ax = axes, cmap = colormap)
-    plt.show(block = False)
+    plt.show(block = True)
 
 ###########################################################################
 def fetchDigit(df: pd.core.frame.DataFrame, which_row: int) -> tuple[int, np.ndarray]:
@@ -121,11 +121,12 @@ def main() -> None:
     #
 
     train_size = int(0.8 * len(A))
-    train_set = A[:train_size]
+    train_set = A[:train_size] #making the first test set with 80/20 split
     test_set  = A[train_size:]
 
     correct = 0
     total = len(test_set)
+    wrong = []
     
     for i in tqdm(range(total), desc="Predicting test digits"):
         test_features = test_set[i, :-1]
@@ -135,13 +136,16 @@ def main() -> None:
         
         if predicted_label == true_label:
             correct += 1
+        else:
+            wrong.append((test_features, true_label, predicted_label))
     
     accuracy = correct / total
     
     print(f"\nAccuracy: {accuracy:.3f}")
 
-    train_set2 = A[train_size:]
+    train_set2 = A[train_size:] #making the second training set with 20/80 split
     test_set2  = A[:train_size]
+    wrong2 = []
     
     correct2 = 0
     total2 = len(test_set)
@@ -154,10 +158,27 @@ def main() -> None:
         
         if predicted_label == true_label:
             correct2 += 1
+        else:
+            wrong2.append((test_features, true_label, predicted_label))
     
     accuracy2 = correct2 / total2
     
     print(f"\nAccuracy #2: {accuracy2:.3f}")
+
+    print("Reviewing incorrect answers from first test:")
+    for j in range(min(5, len(wrong))):
+        pixels_flat, true_label, predicted_label = wrong[j]
+        pixels_8x8 = pixels_flat.reshape((8, 8)).astype(int)
+        print(f"#{j+1}: True={true_label}, Predicted={predicted_label}")
+        drawDigitHeatmap(pixels_8x8, showNumbers=True)
+
+    print("Reviewing incorrect answers from second test:")
+    for k in range(min(5, len(wrong2))):
+        pixels_flat, true_label, predicted_label = wrong2[k]
+        pixels_8x8 = pixels_flat.reshape((8, 8)).astype(int)
+        print(f"#{k+1}: True={true_label}, Predicted={predicted_label}")
+        drawDigitHeatmap(pixels_8x8, showNumbers=True)
+
 
 ###############################################################################
 # wrap the call to main inside this if so that _this_ file can be imported
