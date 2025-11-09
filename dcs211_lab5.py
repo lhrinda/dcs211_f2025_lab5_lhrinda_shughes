@@ -3,8 +3,8 @@ import pandas as pd     # Pandas is Python's "data" library ("dataframe" == spre
 import seaborn as sns   # yay for Seaborn plots!
 import matplotlib.pyplot as plt
 from sklearn.neighbors import KNeighborsClassifier
+from collections import Counter, defaultdict
 import random
-from tqdm import tqdm
 
 ###########################################################################
 def drawDigitHeatmap(pixels: np.ndarray, showNumbers: bool = True) -> None:
@@ -16,7 +16,6 @@ def drawDigitHeatmap(pixels: np.ndarray, showNumbers: bool = True) -> None:
     Returns:
         None -- just plots into a window
     '''
-
     (fig, axes) = plt.subplots(figsize = (4.5, 3))  # aspect ratio
 
     rgb = (0, 0, 0.5)  # each in (0,1), so darkest will be dark blue
@@ -70,9 +69,7 @@ def cleanTheData(df: pd.core.frame.DataFrame) -> np.ndarray:
     df_clean = df_clean.dropna()
 
     # 3) convert to numpy and cast to float64
-    A = df_clean.to_numpy()
-    A = A.astype('float64')
-
+    A = df_clean.to_numpy().astype('float64')
     return A
 
 ###################
@@ -163,93 +160,195 @@ def run_knn_sklearn(X_train: np.ndarray, y_train: np.ndarray, X_test: np.ndarray
     return knn.predict(X_test)
 
 ###################
+def findBestK(X_train: np.ndarray, y_train: np.ndarray, seeds: list = [8675309, 5551212, 42], k_values: list = [1, 3, 5, 7, 9], val_fraction: float = 0.2) -> dict:
+    ''' Finds the best k using a shuffle split for multiple seeds
+    Parameters:
+        X_train: 2D numpy array of training features
+        y_train: 1D numpy array of training labels (ints 0–9)
+        seeds: list of integer seeds to control shuffling/splitting
+        k_values: list of k values (neighbors) to evaluate
+        val_fraction: fraction of rows to hold out for validation for each seed
+    Returns:
+        results: dict with:
+            'per_seed': list of dicts:
+                { 'seed': int, 'best_k': int, 'best_acc': float, 'k_to_acc': {k: acc} }
+            'final_k': int
+    '''
+    per_seed = []
+
+    for seed in seeds:
+        random.seed(seed)
+        np.random.seed(seed)
+
+        # shuffle indices
+        n = len(X_train)
+        idx = list(range(n))
+        random.shuffle(idx)
+
+        # split into sub-train / validation
+        cut = int((1 - val_fraction) * n)
+        idx_tr = idx[:cut]
+        idx_va = idx[cut:]
+
+        X_tr = X_train[idx_tr]
+        y_tr = y_train[idx_tr]
+        X_va = X_train[idx_va]
+        y_va = y_train[idx_va]
+
+        # evaluate each k
+        k_to_acc = {}
+        for k in k_values:
+            y_pred = run_knn_sklearn(X_tr, y_tr, X_va, k)
+            acc = float(np.mean(y_pred == y_va))
+            k_to_acc[k] = acc
+
+        # pick best k for this seed
+        best_k = sorted(k_to_acc.keys(), key=lambda kk: (-k_to_acc[kk], kk))[0]
+        best_acc = k_to_acc[best_k]
+        per_seed.append({
+            'seed': seed,
+            'best_k': best_k,
+            'best_acc': best_acc,
+            'k_to_acc': k_to_acc
+        })
+
+    # decide a final k across seeds: majority vote -> avg acc -> smaller k
+    vote = Counter([r['best_k'] for r in per_seed])
+    max_votes = max(vote.values())
+    candidates = [k for k, v in vote.items() if v == max_votes]
+
+    if len(candidates) == 1:
+        final_k = candidates[0]
+    else:
+        avg_acc = defaultdict(list)
+        for r in per_seed:
+            for k, acc in r['k_to_acc'].items():
+                avg_acc[k].append(acc)
+        best_by_avg = sorted(candidates, key=lambda k: (-np.mean(avg_acc[k]), k))
+        final_k = best_by_avg[0]
+
+    return {'per_seed': per_seed, 'final_k': final_k}
+
+###################
+def trainAndTest(X_train: np.ndarray, y_train: np.ndarray, X_test: np.ndarray, best_k: int) -> np.ndarray:
+    ''' Train k-NN with best_k and predict labels for X_test
+    Parameters:
+        X_train: 2D numpy array of training features (rows = samples, cols = features)
+        y_train: 1D numpy array of training labels (integers 0–9)
+        X_test: 2D numpy array of test features
+        best_k: integer number of neighbors to use (k ≥ 1)
+    Returns:
+        y_pred: 1D numpy array of predicted integer labels for X_test
+    '''
+    knn = KNeighborsClassifier(n_neighbors=best_k)
+    knn.fit(X_train, y_train)
+    y_pred = knn.predict(X_test)
+    return y_pred
+
+###################
 def main() -> None:
-    # for read_csv, use header=0 when row 0 is a header row
+    # load csv
     filename = 'digits.csv'
-    df = pd.read_csv(filename, header = 0)
-    print(df.head())
+    df = pd.read_csv(filename, header=0)
     print(f"{filename} : file read into a pandas dataframe...")
 
     A = cleanTheData(df)
 
-    num_to_draw = 1
-    for i in range(num_to_draw):
-        # let's grab one row of the df at random, extract/shape the digit to be
-        # 8x8, and then draw a heatmap of that digit
-        random_row = random.randint(0, len(df) - 1)
-        (digit, pixels) = fetchDigit(df, random_row)
-        print(f"The digit is {digit}")
-        print(f"The pixels are\n{pixels}")  
+    SHOW_HEATMAP = False
+    if SHOW_HEATMAP:
+        r = random.randint(0, len(df) - 1)
+        digit, pixels = fetchDigit(df, r)
+        print(f"Preview digit at row {r}: {digit}")
         drawDigitHeatmap(pixels)
-        plt.show()
 
     # split 1: test = last 20%
+    print("\n=== First split (train=first 80%, test=last 20%) ===")
     X_test, y_test, X_train, y_train = splitData(A, test_fraction=0.2, swap=False)
+
+    # choose best k (three seeds)
+    fbk = findBestK(X_train, y_train, seeds=[8675309, 5551212, 123123], k_values=[1, 3, 5, 7, 9], val_fraction=0.2)
+    best_k = fbk['final_k']
+    print(f"[findBestK] final chosen k = {best_k}")
+    for r in fbk['per_seed']:
+        print(f"  seed {r['seed']}: best_k={r['best_k']}, acc={r['best_acc']:.3f}")
+
+    # train & test with best_k
+    y_pred_best = trainAndTest(X_train, y_train, X_test, best_k)
+    print(f"\n[trainAndTest] First split, k={best_k}")
+    compareLabels(y_test, y_pred_best)
+
+    # also report a guessed k (k=3) using scikit-learn
+    guessed_k = 3
+    y_pred_k3 = run_knn_sklearn(X_train, y_train, X_test, guessed_k)
+    print(f"\n[scikit-learn] First split (k={guessed_k})")
+    compareLabels(y_test, y_pred_k3)
+
+    # baseline 1-NN + gather first 5 wrong for heatmaps
     train_set = np.column_stack([X_train, y_train])
     test_set  = np.column_stack([X_test,  y_test])
 
-    guessed_k = 3  # small k smooths 1-NN noise but stays local
-    y_pred_sklearn = run_knn_sklearn(X_train, y_train, X_test, guessed_k)
-    print(f"[scikit-learn] First split, k={guessed_k}")
-    compareLabels(y_test, y_pred_sklearn)
-
     correct = 0
-    total = len(test_set)
     wrong = []
-    
-    for i in tqdm(range(total), desc="Predicting test digits"):
+    for i in range(len(test_set)):
         test_features = test_set[i, :-1]
         true_label = int(test_set[i, -1])
-        predicted_label = predictiveModel(train_set, test_features)
-        if predicted_label == true_label:
+        pred = predictiveModel(train_set, test_features)
+        if pred == true_label:
             correct += 1
         else:
-            wrong.append((test_features, true_label, predicted_label))
+            wrong.append((test_features, true_label, pred))
+    print(f"\n[1-NN manual] First split accuracy: {correct/len(test_set):.3f}")
     
-    accuracy = correct / total
-    
-    print(f"\nAccuracy: {accuracy:.3f}")
+    if wrong:
+        print("First five misclassified (first split):")
+        for j in range(min(5, len(wrong))):
+            pixels_flat, true_label, pred = wrong[j]
+            print(f"  #{j+1}: True={true_label}, Pred={pred}")
+            drawDigitHeatmap(pixels_flat.reshape(8, 8).astype(int), showNumbers=True)
 
     # split 2: test = first 20%
-
+    print("\n=== Swapped split (train=last 80%, test=first 20%) ===")
     X_test2, y_test2, X_train2, y_train2 = splitData(A, test_fraction=0.2, swap=True)
+
+    # choose best k on swapped training set
+    fbk2 = findBestK(X_train2, y_train2, seeds=[8675309, 5551212, 123123], k_values=[1, 3, 5, 7, 9], val_fraction=0.2)
+    best_k2 = fbk2['final_k']
+    print(f"[findBestK - swapped] final chosen k = {best_k2}")
+    for r in fbk2['per_seed']:
+        print(f"  seed {r['seed']}: best_k={r['best_k']}, acc={r['best_acc']:.3f}")
+
+    # train & test with best_k on swapped split
+    y_pred_best_2 = trainAndTest(X_train2, y_train2, X_test2, best_k2)
+    print(f"\n[trainAndTest] Swapped split (k={best_k2})")
+    compareLabels(y_test2, y_pred_best_2)
+        
+    y_pred_k3_2 = run_knn_sklearn(X_train2, y_train2, X_test2, guessed_k)
+    print(f"\n[scikit-learn] Swapped split (k={guessed_k})")
+    compareLabels(y_test2, y_pred_k3_2)
+
+    # baseline 1-NN on swapped split
     train_set2 = np.column_stack([X_train2, y_train2])
     test_set2  = np.column_stack([X_test2,  y_test2])
 
-    y_pred_sklearn_2 = run_knn_sklearn(X_train2, y_train2, X_test2, guessed_k)
-    print(f"\n[scikit-learn] Swapped split, k={guessed_k}")
-    compareLabels(y_test2, y_pred_sklearn_2)
-        
     correct2 = 0
-    total2 = len(test_set)
     wrong2 = []
-
-    
-    for i in tqdm(range(total2), desc="Predicting test digits again"):
+    total2 = len(test_set2)
+    for i in range(total2):
         test_features = test_set2[i, :-1]
         true_label = int(test_set2[i, -1])
-        predicted_label = predictiveModel(train_set2, test_features)
-        if predicted_label == true_label:
+        pred = predictiveModel(train_set2, test_features)
+        if pred == true_label:
             correct2 += 1
         else:
-            wrong2.append((test_features, true_label, predicted_label))
-    
-    accuracy2 = correct2 / total2
-    print(f"\nAccuracy #2: {accuracy2:.3f}")
+            wrong2.append((test_features, true_label, pred))
+    print(f"\n[1-NN manual] Swapped split accuracy: {correct2/total2:.3f}")
 
-    print("Reviewing incorrect answers from first test:")
-    for j in range(min(5, len(wrong))):
-        pixels_flat, true_label, predicted_label = wrong[j]
-        pixels_8x8 = pixels_flat.reshape((8, 8)).astype(int)
-        print(f"#{j+1}: True={true_label}, Predicted={predicted_label}")
-        drawDigitHeatmap(pixels_8x8, showNumbers=True)
-
-    print("Reviewing incorrect answers from second test:")
-    for k in range(min(5, len(wrong2))):
-        pixels_flat, true_label, predicted_label = wrong2[k]
-        pixels_8x8 = pixels_flat.reshape((8, 8)).astype(int)
-        print(f"#{k+1}: True={true_label}, Predicted={predicted_label}")
-        drawDigitHeatmap(pixels_8x8, showNumbers=True)
+    if wrong2:
+        print("First five misclassified (swapped split):")
+        for idx in range(min(5, len(wrong2))):
+            pixels_flat, true_label, pred = wrong2[idx]
+            print(f"  #{idx+1}: True={true_label}, Pred={pred}")
+            drawDigitHeatmap(pixels_flat.reshape(8, 8).astype(int), showNumbers=True)
 
 ###############################################################################
 # wrap the call to main inside this if so that _this_ file can be imported
