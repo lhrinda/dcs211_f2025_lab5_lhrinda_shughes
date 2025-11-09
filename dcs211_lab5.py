@@ -2,6 +2,7 @@ import numpy as np      # numpy is Python's "array" library
 import pandas as pd     # Pandas is Python's "data" library ("dataframe" == spreadsheet)
 import seaborn as sns   # yay for Seaborn plots!
 import matplotlib.pyplot as plt
+from sklearn.neighbors import KNeighborsClassifier
 import random
 from tqdm import tqdm
 
@@ -95,6 +96,73 @@ def predictiveModel(train_set: np.ndarray, features: np.ndarray) -> int:
     return int(labels[nearest_index])
 
 ###################
+def splitData(A: np.ndarray, test_fraction: float = 0.2, swap: bool = False) -> list:
+    ''' Splits an array into test/train
+    Parameters:
+        A: numpy array where last column is the label
+        test_fraction: fraction of rows to use for the test set (default 0.2)
+        swap: if False -> LAST test_fraction of rows, if True -> FIRST test_fraction of rows
+    Returns:
+        [X_test, y_test, X_train, y_train]
+    '''
+    n = len(A)
+    cut = int((1 - test_fraction) * n)
+
+    if not swap:
+        # test = last 20%, train = first 80%
+        train = A[:cut]
+        test  = A[cut:]
+    else:
+        # test = first 20%, train = last 80%
+        test  = A[:n - cut]
+        train = A[n - cut:]
+
+    X_train = train[:, :-1]
+    y_train = train[:, -1].astype(int)
+    X_test  = test[:, :-1]
+    y_test  = test[:, -1].astype(int)
+
+    return [X_test, y_test, X_train, y_train]
+
+###################
+def compareLabels(y_true: np.ndarray, y_pred: np.ndarray) -> None:
+    '''Prints totals, accuracy, and a few mismatches
+    Parameters:
+        y_true: 1D numpy array of true integer labels
+        y_pred: 1D numpy array of predicted integer labels
+    Returns:
+        None
+    '''
+    total = len(y_true)
+    correct = int(np.sum(y_true == y_pred))
+    accuracy = correct / total if total > 0 else 0.0
+    print(f"Total: {total}")
+    print(f"Correct: {correct}")
+    print(f"Accuracy: {accuracy:.3f}")
+
+    mismatches = np.where(y_true != y_pred)[0]
+    if len(mismatches) > 0:
+        print("First 10 mismatches (index: true → pred):")
+        for idx in mismatches[:10]:
+            print(f"  {idx}: {int(y_true[idx])} → {int(y_pred[idx])}")
+    else:
+        print("No mismatches!")
+
+def run_knn_sklearn(X_train: np.ndarray, y_train: np.ndarray, X_test: np.ndarray, k: int) -> np.ndarray:
+    '''Fit scikit-learn KNN with chosen k and return predictions for X_test
+    Parameters:
+        X_train: 2D numpy array of training features (rows = samples, cols = features)
+        y_train: 1D numpy array of training labels (integers 0–9)
+        X_test: 2D numpy array of test features
+        k: integer number of neighbors to use (k ≥ 1)
+    Returns:
+        y_pred: 1D numpy array of predicted integer labels for X_test
+    '''
+    knn = KNeighborsClassifier(n_neighbors=k)
+    knn.fit(X_train, y_train)
+    return knn.predict(X_test)
+
+###################
 def main() -> None:
     # for read_csv, use header=0 when row 0 is a header row
     filename = 'digits.csv'
@@ -110,19 +178,20 @@ def main() -> None:
         # 8x8, and then draw a heatmap of that digit
         random_row = random.randint(0, len(df) - 1)
         (digit, pixels) = fetchDigit(df, random_row)
-
         print(f"The digit is {digit}")
         print(f"The pixels are\n{pixels}")  
         drawDigitHeatmap(pixels)
         plt.show()
 
-    #
-    # OK!  Onward to knn for digits! (based on your iris work...)
-    #
+    # split 1: test = last 20%
+    X_test, y_test, X_train, y_train = splitData(A, test_fraction=0.2, swap=False)
+    train_set = np.column_stack([X_train, y_train])
+    test_set  = np.column_stack([X_test,  y_test])
 
-    train_size = int(0.8 * len(A))
-    train_set = A[:train_size] #making the first test set with 80/20 split
-    test_set  = A[train_size:]
+    guessed_k = 3  # small k smooths 1-NN noise but stays local
+    y_pred_sklearn = run_knn_sklearn(X_train, y_train, X_test, guessed_k)
+    print(f"[scikit-learn] First split, k={guessed_k}")
+    compareLabels(y_test, y_pred_sklearn)
 
     correct = 0
     total = len(test_set)
@@ -131,9 +200,7 @@ def main() -> None:
     for i in tqdm(range(total), desc="Predicting test digits"):
         test_features = test_set[i, :-1]
         true_label = int(test_set[i, -1])
-        
         predicted_label = predictiveModel(train_set, test_features)
-        
         if predicted_label == true_label:
             correct += 1
         else:
@@ -143,26 +210,31 @@ def main() -> None:
     
     print(f"\nAccuracy: {accuracy:.3f}")
 
-    train_set2 = A[train_size:] #making the second training set with 20/80 split
-    test_set2  = A[:train_size]
-    wrong2 = []
-    
+    # split 2: test = first 20%
+
+    X_test2, y_test2, X_train2, y_train2 = splitData(A, test_fraction=0.2, swap=True)
+    train_set2 = np.column_stack([X_train2, y_train2])
+    test_set2  = np.column_stack([X_test2,  y_test2])
+
+    y_pred_sklearn_2 = run_knn_sklearn(X_train2, y_train2, X_test2, guessed_k)
+    print(f"\n[scikit-learn] Swapped split, k={guessed_k}")
+    compareLabels(y_test2, y_pred_sklearn_2)
+        
     correct2 = 0
     total2 = len(test_set)
+    wrong2 = []
+
     
-    for i in tqdm(range(total), desc="Predicting test digits again"):
+    for i in tqdm(range(total2), desc="Predicting test digits again"):
         test_features = test_set2[i, :-1]
         true_label = int(test_set2[i, -1])
-        
         predicted_label = predictiveModel(train_set2, test_features)
-        
         if predicted_label == true_label:
             correct2 += 1
         else:
             wrong2.append((test_features, true_label, predicted_label))
     
     accuracy2 = correct2 / total2
-    
     print(f"\nAccuracy #2: {accuracy2:.3f}")
 
     print("Reviewing incorrect answers from first test:")
@@ -178,7 +250,6 @@ def main() -> None:
         pixels_8x8 = pixels_flat.reshape((8, 8)).astype(int)
         print(f"#{k+1}: True={true_label}, Predicted={predicted_label}")
         drawDigitHeatmap(pixels_8x8, showNumbers=True)
-
 
 ###############################################################################
 # wrap the call to main inside this if so that _this_ file can be imported
